@@ -1,25 +1,22 @@
+mod error;
+mod services;
+mod state;
+use crate::error::AppError;
+use crate::services::keycloak::{
+    user_register_request, login_request, logout_request, refresh_request,
+};
+use crate::state::AppState;
+
 use axum::{
     Router,
     extract::{Form, State},
-    response::IntoResponse,
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
     routing::post,
-    serve,
 };
-use axum_extra::extract::CookieJar;
-use axum_extra::extract::cookie::Cookie;
-use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
-use std::ops::Add;
+use axum_extra::extract::cookie::{Cookie, CookieJar};
+use serde::Deserialize;
 use tokio::net::TcpListener;
-
-#[derive(Clone)]
-struct AppState {
-    http_client: reqwest::Client,
-    keycloak_base_url: String,
-    keycloak_realm: String,
-    keycloak_client_id: String,
-    keycloak_client_secret: String,
-}
 
 #[derive(Deserialize)]
 struct LoginDTO {
@@ -35,60 +32,52 @@ struct RegisterDTO {
     password: String,
 }
 
-#[derive(Deserialize)]
-struct KeycloakTokenResponse {
-    access_token: String,
-    refresh_token: String,
-    expires_in: u64, //TODO: use
+enum HtmlOrJson {
+    Html(StatusCode, String),
+    Json(StatusCode, serde_json::Value),
+    Empty(StatusCode),
 }
 
-#[derive(Serialize)]
-struct KeycloakUserRequest {
-    username: String,
-    email: String,
-    enabled: bool,
-    credentials: Vec<KeycloakCredential>,
+impl IntoResponse for HtmlOrJson {
+    fn into_response(self) -> Response {
+        match self {
+            HtmlOrJson::Html(status, body) => (
+                status,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                body,
+            )
+                .into_response(),
+            HtmlOrJson::Json(status, val) => (
+                status,
+                [(header::CONTENT_TYPE, "application/json")],
+                axum::Json(val),
+            )
+                .into_response(),
+            HtmlOrJson::Empty(status) => status.into_response(),
+        }
+    }
 }
 
-#[derive(Serialize)]
-struct KeycloakCredential {
-    #[serde(rename = "type")]
-    credential_type: String,
-    value: String,
-    temporary: bool,
-}
-
-#[derive(Serialize)]
-struct KeycloakRole {
-    name: String,
-}
-
-#[derive(Deserialize)]
-struct AdminTokenResponse {
-    access_token: String,
+fn wants_html(headers: &HeaderMap) -> bool {
+    headers.get("HX-Request").is_some()
+        || headers
+            .get(header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.contains("text/html"))
+            .unwrap_or(false)
 }
 
 #[tokio::main]
 async fn main() {
-    let app = create_app(AppState {
-        http_client: reqwest::Client::new(),
-        keycloak_base_url: "http://localhost:8080".to_string(),
-        keycloak_realm: "emarket".to_string(),
-        keycloak_client_id: "emarket-app".to_string(),
-        keycloak_client_secret: "9F0z3yzlEGeqdIWvyKcSKHhwZOnMAxwA".to_string(),
-    });
+    let app = create_app(AppState::default());
     let listener = TcpListener::bind("0.0.0.0:3000")
         .await
-        .expect("failed to bind tcp listener"); //TODO choose a port
-    serve(listener, app).await.expect("failed starting server"); //TODO
+        .expect("failed to bind tcp listener");
+    axum::serve(listener, app)
+        .await
+        .expect("failed starting server");
 }
 
-/// ## Endpoints
-/// - `/api/users/login` - authorizes user and returns JWT and refresh token ([login_handler])
-/// - `/api/users/logout` - logout user. ([logout_handler])
-/// - `/api/users/refresh` - refreshes user's JWT token with refresh token.([refresh_handler])
-/// - `/api/users/customers/register` - registers user in keycloak and publishes message to kafka topic 'customer-registered', that customer created an account([customer_register_handler])
-/// - `/api/users/vendors/register` - registers user in keycloak and publishes message to kafka topic 'vendor-registered', that vendor created an account([vendor_register_handler])
 fn create_app(state: AppState) -> Router {
     Router::new()
         .route("/api/users/login", post(login_handler))
@@ -105,277 +94,126 @@ fn create_app(state: AppState) -> Router {
 async fn login_handler(
     State(state): State<AppState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Form(payload): Form<LoginDTO>,
-) -> impl IntoResponse {
-    let url = format!(
-        "{}/realms/{}/protocol/openid-connect/token",
-        state.keycloak_base_url, state.keycloak_realm
-    );
-    let params = [
-        ("grant_type", "password"),
-        ("client_id", &state.keycloak_client_id),
-        ("client_secret", &state.keycloak_client_secret),
-        ("username", &payload.login),
-        ("password", &payload.password),
-    ];
-    let response = match state.http_client.post(&url).form(&params).send().await {
-        Ok(response) => response,
-        Err(_) => {
-            return (jar, StatusCode::INTERNAL_SERVER_ERROR).into_response();
-        }
-    };
+) -> Result<Response, AppError> {
+    let tokens = login_request(&state.keycloak_state, &payload).await?;
+    let new_jar = jar
+        .add(
+            Cookie::build(("access_token", tokens.access_token))
+                .path("/")
+                .http_only(true),
+        )
+        .add(
+            Cookie::build(("refresh_token", tokens.refresh_token))
+                .path("/")
+                .http_only(true),
+        );
 
-    if response.status().is_success() {
-        let tokens: KeycloakTokenResponse = match response.json().await {
-            Ok(json) => json,
-            Err(_) => {
-                return (jar, StatusCode::INTERNAL_SERVER_ERROR).into_response();
-            }
-        };
-        let access_cookie = Cookie::build(("access_token", tokens.access_token))
-            .path("/")
-            .http_only(true);
-        let refresh_cookie = Cookie::build(("refresh_token", tokens.refresh_token))
-            .path("/")
-            .http_only(true);
-        let new_jar = jar.add(access_cookie).add(refresh_cookie);
-        (new_jar, StatusCode::OK).into_response()
+    if wants_html(&headers) {
+        let html = String::new();//TODO
+        Ok((new_jar, HtmlOrJson::Html(StatusCode::OK, html)).into_response())
     } else {
-        (jar, StatusCode::INTERNAL_SERVER_ERROR).into_response()
+        Ok((
+            new_jar,
+            HtmlOrJson::Json(StatusCode::OK, serde_json::json!({"status": "ok"})),
+        )
+            .into_response())
     }
 }
 
-async fn logout_handler(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
-    let refresh_token = match jar.get("refresh_token") {
-        Some(cookie) => cookie.value().to_string(),
-        None => return (jar, StatusCode::UNAUTHORIZED).into_response(), //TODO json response to html
-    };
+async fn logout_handler(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let refresh_token = jar
+        .get("refresh_token")
+        .map(|c| c.value().to_string())
+        .ok_or(AppError::Unauthorized)?;
+    logout_request(&state.keycloak_state, &refresh_token).await?;
+    let new_jar = jar
+        .remove(Cookie::from("access_token"))
+        .remove(Cookie::from("refresh_token"));
 
-    let url = format!(
-        "{}/realms/{}/protocol/openid-connect/logout",
-        state.keycloak_base_url, state.keycloak_realm
-    );
-    let params = [
-        ("client_id", &state.keycloak_client_id),
-        ("client_secret", &state.keycloak_client_secret),
-        ("refresh_token", &refresh_token),
-    ];
-
-    let response = match state.http_client.post(&url).form(&params).send().await {
-        Ok(response) => response,
-        Err(_) => {
-            return (jar, StatusCode::INTERNAL_SERVER_ERROR).into_response();
-        }
-    };
-
-    if response.status().is_success() {
-        let new_jar = jar
-            .remove(Cookie::from("access_token"))
-            .remove(Cookie::from("refresh_token"));
-        (new_jar, StatusCode::OK).into_response()
+    if wants_html(&headers) {
+        let html = String::new();//TODO
+        Ok((new_jar, HtmlOrJson::Html(StatusCode::OK, html)).into_response())
     } else {
-        (jar, StatusCode::INTERNAL_SERVER_ERROR).into_response()
+        Ok((
+            new_jar,
+            HtmlOrJson::Json(StatusCode::OK, serde_json::json!({"status": "ok"})),
+        )
+            .into_response())
     }
 }
 
-async fn refresh_handler(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
-    let old_refresh_token = match jar.get("refresh_token") {
-        Some(cookie) => cookie.value().to_string(),
-        None => return (jar, StatusCode::UNAUTHORIZED).into_response(), //TODO json response to html
-    };
+async fn refresh_handler(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let old_refresh_token = jar
+        .get("refresh_token")
+        .map(|c| c.value().to_string())
+        .ok_or(AppError::Unauthorized)?;
 
-    let url = format!(
-        "{}/realms/{}/protocol/openid-connect/token",
-        state.keycloak_base_url, state.keycloak_realm
-    );
-    let params = [
-        ("grant_type", "refresh_token"),
-        ("client_id", &state.keycloak_client_id),
-        ("client_secret", &state.keycloak_client_secret),
-        ("refresh_token", &old_refresh_token),
-    ];
+    let tokens = refresh_request(&state.keycloak_state, &old_refresh_token).await?;
+    let new_jar = jar
+        .add(
+            Cookie::build(("access_token", tokens.access_token))
+                .path("/")
+                .http_only(true),
+        )
+        .add(
+            Cookie::build(("refresh_token", tokens.refresh_token))
+                .path("/")
+                .http_only(true),
+        );
 
-    let response = match state.http_client.post(&url).form(&params).send().await {
-        Ok(response) => response,
-        Err(_) => {
-            return (jar, StatusCode::INTERNAL_SERVER_ERROR).into_response();
-        }
-    };
-    if response.status().is_success() {
-        let tokens: KeycloakTokenResponse = match response.json().await {
-            Ok(json) => json,
-            Err(_) => {
-                return (jar, StatusCode::INTERNAL_SERVER_ERROR).into_response();
-            }
-        };
-        let access_cookie = Cookie::build(("access_token", tokens.access_token))
-            .path("/")
-            .http_only(true);
-        let refresh_cookie = Cookie::build(("refresh_token", tokens.refresh_token))
-            .path("/")
-            .http_only(true);
-        let new_jar = jar.add(access_cookie).add(refresh_cookie);
-        (new_jar, StatusCode::OK).into_response()
+    if wants_html(&headers) {
+        Ok((new_jar, HtmlOrJson::Empty(StatusCode::OK)).into_response())
     } else {
-        (jar, StatusCode::UNAUTHORIZED).into_response()
+        Ok((
+            new_jar,
+            HtmlOrJson::Json(StatusCode::OK, serde_json::json!({"status": "ok"})),
+        )
+            .into_response())
     }
 }
 
 async fn customer_register_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Form(payload): Form<RegisterDTO>,
-) -> impl IntoResponse {
-    let user_id = match register_new_user(state.clone(), payload).await {
-        Ok(id) => id,
-        Err(status) => return status.into_response(),
-    };
-
-    let admin_token = match get_admin_token(&state).await {
-        Ok(token) => token,
-        Err(status) => return status.into_response(),
-    };
-
-    let role_url = format!(
-        "{}/admin/realms/{}/users/{}/role-mappings/realm",
-        state.keycloak_base_url, state.keycloak_realm, user_id
-    );
-
-    let roles_payload = vec![KeycloakRole {
-        name: "customer".to_string(),
-    }];
-
-    let response = match state
-        .http_client
-        .post(&role_url)
-        .bearer_auth(admin_token)
-        .json(&roles_payload)
-        .send()
-        .await
-    {
-        Ok(res) => res,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-
-    if response.status().is_success() {
-        // TODO: 'customer-registered'
-        StatusCode::CREATED.into_response()
+) -> Result<Response, AppError> {
+    user_register_request(&state.keycloak_state, payload, "customer").await?;
+    // TODO: 'customer-registered'
+    if wants_html(&headers) {
+        let html = String::new();//TODO
+        Ok(HtmlOrJson::Html(StatusCode::CREATED, html).into_response())
     } else {
-        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        Ok(
+            HtmlOrJson::Json(StatusCode::CREATED, serde_json::json!({"status": "ok"}))
+                .into_response(),
+        )
     }
 }
 
 async fn vendor_register_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Form(payload): Form<RegisterDTO>,
-) -> impl IntoResponse {
-    let user_id = match register_new_user(state.clone(), payload).await {
-        Ok(id) => id,
-        Err(status) => return status.into_response(),
-    };
-
-    let admin_token = match get_admin_token(&state).await {
-        Ok(token) => token,
-        Err(status) => return status.into_response(),
-    };
-
-    let role_url = format!(
-        "{}/admin/realms/{}/users/{}/role-mappings/realm",
-        state.keycloak_base_url, state.keycloak_realm, user_id
-    );
-
-    let roles_payload = vec![KeycloakRole {
-        name: "vendor".to_string(),
-    }];
-
-    let response = match state
-        .http_client
-        .post(&role_url)
-        .bearer_auth(admin_token)
-        .json(&roles_payload)
-        .send()
-        .await
-    {
-        Ok(res) => res,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-
-    if response.status().is_success() {
-        // TODO: kafka 'vendor-registered'
-        StatusCode::CREATED.into_response()
+) -> Result<Response, AppError> {
+    user_register_request(&state.keycloak_state, payload, "vendor").await?;
+    // TODO: 'vendor-registered'
+    if wants_html(&headers) {
+        let html = String::new();//TODO
+        Ok(HtmlOrJson::Html(StatusCode::CREATED, html).into_response())
     } else {
-        StatusCode::INTERNAL_SERVER_ERROR.into_response()
-    }
-}
-
-async fn get_admin_token(state: &AppState) -> Result<String, StatusCode> {
-    let url = format!(
-        "{}/realms/{}/protocol/openid-connect/token",
-        state.keycloak_base_url, state.keycloak_realm
-    );
-    let params = [
-        ("grant_type", "client_credentials"),
-        ("client_id", &state.keycloak_client_id),
-        ("client_secret", &state.keycloak_client_secret),
-    ];
-    let response = state
-        .http_client
-        .post(&url)
-        .form(&params)
-        .send()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    if response.status().is_success() {
-        let json: AdminTokenResponse = response
-            .json()
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        Ok(json.access_token)
-    } else {
-        Err(StatusCode::UNAUTHORIZED)
-    }
-}
-
-async fn register_new_user(state: AppState, payload: RegisterDTO) -> Result<String, StatusCode> {
-    let admin_token = get_admin_token(&state).await?;
-
-    let register_url = format!(
-        "{}/admin/realms/{}/users",
-        state.keycloak_base_url, state.keycloak_realm
-    );
-
-    let new_user = KeycloakUserRequest {
-        username: payload.first_name.add(" ").add(&payload.second_name),
-        email: payload.email,
-        enabled: true,
-        credentials: vec![KeycloakCredential {
-            credential_type: "password".to_string(),
-            value: payload.password,
-            temporary: false,
-        }],
-    };
-
-    let response = state
-        .http_client
-        .post(&register_url)
-        .bearer_auth(admin_token)
-        .json(&new_user)
-        .send()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    if response.status() == StatusCode::CREATED {
-        if let Some(location) = response.headers().get("Location") {
-            if let Ok(location_str) = location.to_str() {
-                if let Some(uuid) = location_str.split('/').last() {
-                    return Ok(uuid.to_string());
-                }
-            }
-        }
-        Err(StatusCode::INTERNAL_SERVER_ERROR)
-    } else if response.status() == StatusCode::CONFLICT {
-        Err(StatusCode::CONFLICT)
-    } else {
-        Err(StatusCode::BAD_REQUEST)
+        Ok(
+            HtmlOrJson::Json(StatusCode::CREATED, serde_json::json!({"status": "ok"}))
+                .into_response(),
+        )
     }
 }

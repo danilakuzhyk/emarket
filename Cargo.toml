@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "backend/auth-api",
+    "backend/blob-api",
+    "backend/customers-api",
+    "backend/goods-api",
+    "backend/orders-api",
+    "backend/shared",
+    "backend/vendors-api",
+]
+resolver = "2"
+
+[workspace.dependencies]
+axum = "0.8.9"
+tokio = { version = "1.52.3", features = ["rt-multi-thread"]}
+serde = { version = "1.0.228", features = ["derive"] }
+maud = { version = "0.27.0", features = ["axum"] }
