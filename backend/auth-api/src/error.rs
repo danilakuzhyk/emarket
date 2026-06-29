@@ -7,6 +7,7 @@ pub enum AppError {
     Keycloak(&'static str, StatusCode, String),
     Unauthorized,
     Conflict,
+    Kafka(String),
 }
 
 impl IntoResponse for AppError {
@@ -28,6 +29,13 @@ impl IntoResponse for AppError {
             }
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
             AppError::Conflict => (StatusCode::CONFLICT, "User already exists".to_string()),
+            AppError::Kafka(err_msg) => {
+                println!("Kafka error {}", err_msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Message broker error".to_string(),
+                )
+            }
         };
         (status, err_msg).into_response()
     }

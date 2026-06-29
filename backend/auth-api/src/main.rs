@@ -1,21 +1,27 @@
 mod error;
 mod services;
 mod state;
+mod ui;
+
 use crate::error::AppError;
+use crate::services::kafka::{send_customer_registered, send_vendor_registered};
 use crate::services::keycloak::{
-    user_register_request, login_request, logout_request, refresh_request,
+    login_request, logout_request, refresh_request, user_register_request,
 };
 use crate::state::AppState;
-
+use crate::ui::{
+    customer_register_form, html_success_fragment, layout, login_form, vendor_register_form,
+};
 use axum::{
     Router,
     extract::{Form, State},
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
-    routing::post,
+    response::{Html, IntoResponse, Response},
+    routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use serde::Deserialize;
+use shared::kafka_events::{CustomerRegisteredEvent, VendorRegisteredEvent};
 use tokio::net::TcpListener;
 
 #[derive(Deserialize)]
@@ -80,6 +86,9 @@ async fn main() {
 
 fn create_app(state: AppState) -> Router {
     Router::new()
+        .route("/login", get(get_login_page))
+        .route("/register/customer", get(get_customer_register_page))
+        .route("/register/vendor", get(get_vendor_register_page))
         .route("/api/users/login", post(login_handler))
         .route("/api/users/logout", post(logout_handler))
         .route("/api/users/refresh", post(refresh_handler))
@@ -111,12 +120,20 @@ async fn login_handler(
         );
 
     if wants_html(&headers) {
-        let html = String::new();//TODO
-        Ok((new_jar, HtmlOrJson::Html(StatusCode::OK, html)).into_response())
+        let response = (
+            StatusCode::OK,
+            [("HX-Redirect", "/api/customers/profile")], //TODO: choose where to go
+        )
+            .into_response();
+
+        Ok((new_jar, response).into_response())
     } else {
         Ok((
             new_jar,
-            HtmlOrJson::Json(StatusCode::OK, serde_json::json!({"status": "ok"})),
+            HtmlOrJson::Json(
+                StatusCode::OK,
+                serde_json::json!({"status": "authenticated"}),
+            ),
         )
             .into_response())
     }
@@ -137,7 +154,7 @@ async fn logout_handler(
         .remove(Cookie::from("refresh_token"));
 
     if wants_html(&headers) {
-        let html = String::new();//TODO
+        let html = String::new(); //TODO
         Ok((new_jar, HtmlOrJson::Html(StatusCode::OK, html)).into_response())
     } else {
         Ok((
@@ -187,10 +204,11 @@ async fn customer_register_handler(
     headers: HeaderMap,
     Form(payload): Form<RegisterDTO>,
 ) -> Result<Response, AppError> {
-    user_register_request(&state.keycloak_state, payload, "customer").await?;
-    // TODO: 'customer-registered'
+    let user_id = user_register_request(&state.keycloak_state, &payload, "customer").await?;
+    let event = CustomerRegisteredEvent::new(user_id, payload.email);
+    send_customer_registered(&state.kafka_state, event).await?;
     if wants_html(&headers) {
-        let html = String::new();//TODO
+        let html = html_success_fragment(""); // TODO: make up message
         Ok(HtmlOrJson::Html(StatusCode::CREATED, html).into_response())
     } else {
         Ok(
@@ -205,10 +223,11 @@ async fn vendor_register_handler(
     headers: HeaderMap,
     Form(payload): Form<RegisterDTO>,
 ) -> Result<Response, AppError> {
-    user_register_request(&state.keycloak_state, payload, "vendor").await?;
-    // TODO: 'vendor-registered'
+    let user_id = user_register_request(&state.keycloak_state, &payload, "vendor").await?;
+    let event = VendorRegisteredEvent::new(user_id, payload.email);
+    send_vendor_registered(&state.kafka_state, event).await?;
     if wants_html(&headers) {
-        let html = String::new();//TODO
+        let html = html_success_fragment(""); //TODO: make up message
         Ok(HtmlOrJson::Html(StatusCode::CREATED, html).into_response())
     } else {
         Ok(
@@ -216,4 +235,16 @@ async fn vendor_register_handler(
                 .into_response(),
         )
     }
+}
+
+async fn get_login_page() -> Html<String> {
+    Html(layout("e-Market log in", login_form()))
+}
+
+async fn get_customer_register_page() -> Html<String> {
+    Html(layout("Customer registration", customer_register_form()))
+}
+
+async fn get_vendor_register_page() -> Html<String> {
+    Html(layout("Vendor registration", vendor_register_form()))
 }

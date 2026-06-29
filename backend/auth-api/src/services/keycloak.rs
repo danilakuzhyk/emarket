@@ -132,11 +132,21 @@ pub async fn refresh_request(
 
 pub async fn user_register_request(
     state: &KeycloakState,
-    payload: RegisterDTO,
+    payload: &RegisterDTO,
+    role: &str,
+) -> Result<String, AppError> {
+    let admin_token = get_admin_token(&state).await?;
+    let user_id = register_new_user(state, payload, &*admin_token).await?;
+    set_user_role(&state, &*admin_token, &*user_id, role).await?;
+    Ok(user_id)
+}
+
+pub async fn set_user_role(
+    state: &KeycloakState,
+    admin_token: &str,
+    user_id: &str,
     role: &str,
 ) -> Result<(), AppError> {
-    let user_id = register_new_user(state, payload).await?;
-    let admin_token = get_admin_token(&state).await?;
     let role = get_role_by_name(&state, &admin_token, role).await?;
     let role_url = format!(
         "{}/admin/realms/{}/users/{}/role-mappings/realm",
@@ -215,10 +225,9 @@ async fn get_role_by_name(
 
 async fn register_new_user(
     state: &KeycloakState,
-    payload: RegisterDTO,
+    payload: &RegisterDTO,
+    admin_token: &str,
 ) -> Result<String, AppError> {
-    let admin_token = get_admin_token(state).await?;
-
     let register_url = format!(
         "{}/admin/realms/{}/users",
         state.keycloak_base_url, state.keycloak_realm
@@ -226,13 +235,13 @@ async fn register_new_user(
 
     let new_user = KeycloakUserRequest {
         username: payload.email.clone(),
-        email: payload.email,
+        email: payload.email.clone(),
         enabled: true,
-        first_name: Some(payload.first_name),
-        last_name: Some(payload.second_name),
+        first_name: Some(payload.first_name.clone()),
+        last_name: Some(payload.second_name.clone()),
         credentials: vec![KeycloakCredential {
             credential_type: "password".to_string(),
-            value: payload.password,
+            value: payload.password.clone(),
             temporary: false,
         }],
     };

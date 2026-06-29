@@ -1,4 +1,3 @@
-use crate::kafka_events::{CustomerRegisteredEvent, VendorRegisteredEvent};
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use std::time::Duration;
@@ -30,39 +29,23 @@ impl SharedKafkaProducer {
         Self { producer }
     }
 
-    pub async fn send_customer_registered(
-        &self,
-        event: &CustomerRegisteredEvent,
-    ) -> Result<(), String> {
-        let payload = match serde_json::to_string(event) {
-            Ok(json_string) => json_string,
-            Err(err) => return Err(format!("Serialization fault: {}", err)),
+    pub async fn send_internal<T>(&self, topic: &str, key: &str, payload: &T) -> Result<(), String>
+    where
+        T: serde::Serialize,
+    {
+        let payload_bytes = match serde_json::to_vec(payload) {
+            Ok(bytes) => bytes,
+            Err(error) => return Err(error.to_string()),
         };
 
-        let record = FutureRecord::to("customer-registered")
-            .payload(&payload)
-            .key(&event.user_id);
-
-        match self.producer.send(record, Duration::from_secs(0)).await {
-            Ok(_) => Ok(()),
-            Err((kafka_error, _)) => Err(format!("Error Kafka: {}", kafka_error)),
-        }
-    }
-
-    pub async fn send_vendor_registered(
-        &self,
-        event: &VendorRegisteredEvent,
-    ) -> Result<(), String> {
-        let payload = match serde_json::to_string(event) {
-            Ok(json_string) => json_string,
-            Err(err) => return Err(format!("Serialization fault: {}", err)),
-        };
-
-        let record = FutureRecord::to("vendor-registered")
-            .payload(&payload)
-            .key(&event.user_id);
-
-        match self.producer.send(record, Duration::from_secs(0)).await {
+        match self
+            .producer
+            .send(
+                FutureRecord::to(topic).payload(&payload_bytes).key(key),
+                Duration::from_secs(5),
+            )
+            .await
+        {
             Ok(_) => Ok(()),
             Err((kafka_error, _)) => Err(format!("Error Kafka: {}", kafka_error)),
         }
