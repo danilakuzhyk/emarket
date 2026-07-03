@@ -3,6 +3,7 @@ use crate::{LoginDTO, RegisterDTO};
 use axum::http::StatusCode;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
 #[derive(Clone)]
 pub struct KeycloakState {
@@ -21,6 +22,15 @@ impl Default for KeycloakState {
             keycloak_client_id: "emarket-app".to_string(),
             keycloak_client_secret: "nqLfnsT8VqSoB4Pl3Wq6c7QtznfayvDf".to_string(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserID(String);
+
+impl Display for UserID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -134,17 +144,18 @@ pub async fn user_register_request(
     state: &KeycloakState,
     payload: &RegisterDTO,
     role: &str,
-) -> Result<String, AppError> {
+) -> Result<UserID, AppError> {
+    println!("Регистрация пользователя. Переданная роль: {}", role);
     let admin_token = get_admin_token(&state).await?;
     let user_id = register_new_user(state, payload, &*admin_token).await?;
-    set_user_role(&state, &*admin_token, &*user_id, role).await?;
+    set_user_role(&state, &*admin_token, &user_id, role).await?;
     Ok(user_id)
 }
 
 pub async fn set_user_role(
     state: &KeycloakState,
     admin_token: &str,
-    user_id: &str,
+    user_id: &UserID,
     role: &str,
 ) -> Result<(), AppError> {
     let role = get_role_by_name(&state, &admin_token, role).await?;
@@ -227,7 +238,7 @@ async fn register_new_user(
     state: &KeycloakState,
     payload: &RegisterDTO,
     admin_token: &str,
-) -> Result<String, AppError> {
+) -> Result<UserID, AppError> {
     let register_url = format!(
         "{}/admin/realms/{}/users",
         state.keycloak_base_url, state.keycloak_realm
@@ -260,7 +271,7 @@ async fn register_new_user(
         if let Some(location) = response.headers().get("Location") {
             if let Ok(location_str) = location.to_str() {
                 if let Some(uuid) = location_str.split('/').last() {
-                    return Ok(uuid.to_string());
+                    return Ok(UserID(uuid.to_string()));
                 }
             }
         }

@@ -1,17 +1,18 @@
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use reqwest::Error;
+use axum::{
+    http::{HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Response},
+};
 
 pub enum AppError {
-    Reqwest(Error),
+    Reqwest(reqwest::Error),
     Keycloak(&'static str, StatusCode, String),
     Unauthorized,
     Conflict,
     Kafka(String),
 }
 
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
+impl AppError {
+    pub fn into_response_with_headers(self, headers: &HeaderMap) -> Response {
         let (status, err_msg) = match self {
             AppError::Reqwest(err) => {
                 println!("HTTP Error: {}", err);
@@ -27,8 +28,14 @@ impl IntoResponse for AppError {
                     "Identity provider error".to_string(),
                 )
             }
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
-            AppError::Conflict => (StatusCode::CONFLICT, "User already exists".to_string()),
+            AppError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "Invalid email or password".to_string(),
+            ),
+            AppError::Conflict => (
+                StatusCode::CONFLICT,
+                "User with this email already exists".to_string(),
+            ),
             AppError::Kafka(err_msg) => {
                 println!("Kafka error {}", err_msg);
                 (
@@ -37,12 +44,26 @@ impl IntoResponse for AppError {
                 )
             }
         };
-        (status, err_msg).into_response()
+
+        if shared::html_or_json::wants_html(headers) {
+            let html_fragment = crate::ui::html_error_fragment(&err_msg);
+
+            (StatusCode::OK, Html(html_fragment)).into_response()
+        } else {
+            (status, err_msg).into_response()
+        }
     }
 }
 
-impl From<Error> for AppError {
-    fn from(err: Error) -> Self {
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let headers = HeaderMap::new();
+        self.into_response_with_headers(&headers)
+    }
+}
+
+impl From<reqwest::Error> for AppError {
+    fn from(err: reqwest::Error) -> Self {
         AppError::Reqwest(err)
     }
 }

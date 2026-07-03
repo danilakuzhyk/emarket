@@ -18,8 +18,7 @@ pub fn layout(title: &str, content: String) -> String {
                     }
                     ul {
                         li { a href="/login" { "Log in" } }
-                        li { a href="/register/customer" { "Client registration" } }
-                        li { a href="/register/vendor" { "Vendor registration" } }
+                        li { a href="/register" { "Registration" } }
                     }
                 }
                 main class="container" {
@@ -52,24 +51,30 @@ pub fn login_form() -> String {
     form.into_string()
 }
 
-pub fn customer_register_form() -> String {
+pub fn register_form() -> String {
     let form = html! {
-        article {
-            header { "New customer registration" }
-            form hx-post="/api/users/customers/register" hx-target="#error-container" hx-swap="innerHTML" {
-                label for="first_name" { "Name" }
-                input type="text" id="first_name" name="first_name" placeholder="Ivan" required;
+        article id="register-card" {
+            header { "Create your account" }
 
-                label for="second_name" { "Surname" }
-                input type="text" id="second_name" name="second_name" placeholder="Ivanov" required;
+            div id="registration-container" {
 
-                label for="email" { "Email" }
-                input type="email" id="email" name="email" placeholder="ivan@example.com" required;
+                fieldset {
+                    legend { "Register as:" }
+                    label for="role_customer" {
+                        input type="radio" id="role_customer" name="ui-role" value="customer" checked
+                            hx-get="/register/customer-fragment" hx-target="#form-body" hx-swap="innerHTML";
+                        "Customer"
+                    }
+                    label for="role_vendor" {
+                        input type="radio" id="role_vendor" name="ui-role" value="vendor"
+                            hx-get="/register/vendor-fragment" hx-target="#form-body" hx-swap="innerHTML";
+                        "Vendor"
+                    }
+                }
 
-                label for="password" { "Password" }
-                input type="password" id="password" name="password" required;
-
-                button type="submit" { "Confirm" }
+                div id="form-body" {
+                    (maud::PreEscaped(&confirm_button("customer")))
+                }
             }
             div id="error-container" {}
         }
@@ -77,29 +82,30 @@ pub fn customer_register_form() -> String {
     form.into_string()
 }
 
-pub fn vendor_register_form() -> String {
-    let form = html! {
-        article {
-            header { "New vendor registration" }
-            form hx-post="/api/users/vendors/register" hx-target="#error-container" hx-swap="innerHTML" {
-                label for="first_name" { "Name" }
-                input type="text" id="first_name" name="first_name" placeholder="Ivan" required;
-
-                label for="second_name" { "Surname" }
-                input type="text" id="second_name" name="second_name" placeholder="Ivanov" required;
-
-                label for="email" { "Work email" }
-                input type="email" id="email" name="email" placeholder="vendor@example.com" required;
-
-                label for="password" { "Password" }
-                input type="password" id="password" name="password" required;
-
-                button type="submit" class="secondary" { "Confirm" }
-            }
-            div id="error-container" {}
+pub fn confirm_button(role: &str) -> String {
+    let markup = html! {
+        form hx-post=(format!("/api/users/{}s/register", role)) hx-target="#error-container" hx-swap="innerHTML" {
+            (shared_fields())
+            button type="submit" { (format!("Confirm Registration as {}", role)) }
         }
     };
-    form.into_string()
+    markup.into_string()
+}
+
+fn shared_fields() -> maud::Markup {
+    html! {
+        label for="first_name" { "Name" }
+        input type="text" id="first_name" name="first_name" placeholder="Ivan" required;
+
+        label for="second_name" { "Surname" }
+                input type="text" id="second_name" name="second_name" placeholder="Ivanov" required;
+
+        label for="email" { "Email" }
+        input type="email" id="email" name="email" placeholder="ivan@example.com" required;
+
+        label for="password" { "Password" }
+        input type="password" id="password" name="password" required;
+    }
 }
 
 pub fn html_error_fragment(message: &str) -> String {
