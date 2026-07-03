@@ -145,7 +145,6 @@ pub async fn user_register_request(
     payload: &RegisterDTO,
     role: &str,
 ) -> Result<UserID, AppError> {
-    println!("Регистрация пользователя. Переданная роль: {}", role);
     let admin_token = get_admin_token(&state).await?;
     let user_id = register_new_user(state, payload, &*admin_token).await?;
     set_user_role(&state, &*admin_token, &user_id, role).await?;
