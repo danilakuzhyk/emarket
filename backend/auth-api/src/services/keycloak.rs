@@ -21,6 +21,31 @@ impl Default for KeycloakState {
             keycloak_realm: "emarket".to_string(),
             keycloak_client_id: "emarket-app".to_string(),
             keycloak_client_secret: "nqLfnsT8VqSoB4Pl3Wq6c7QtznfayvDf".to_string(),
+impl KeycloakState {
+    pub async fn from_env() -> Result<Self, AppError> {
+        let keycloak_base_url = std::env::var("KEYCLOAK_BASE_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+        let keycloak_realm =
+            std::env::var("KEYCLOAK_REALM").unwrap_or_else(|_| "emarket".to_string());
+        let keycloak_client_id =
+            std::env::var("KEYCLOAK_CLIENT_ID").unwrap_or_else(|_| "emarket-app".to_string());
+        let keycloak_client_secret = std::env::var("KEYCLOAK_CLIENT_SECRET")
+            .unwrap_or_else(|_| "nqLfnsT8VqSoB4Pl3Wq6c7QtznfayvDf".to_string());
+
+        let http_client = Client::new();
+        let cached_jwks =
+            fetch_jwks_with_retry(&http_client, &keycloak_base_url, &keycloak_realm).await?;
+
+        Ok(Self {
+            http_client,
+            keycloak_base_url,
+            keycloak_realm,
+            keycloak_client_id,
+            keycloak_client_secret,
+            cached_jwks,
+        })
+    }
+}
         }
     }
 }

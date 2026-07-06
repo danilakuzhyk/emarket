@@ -1,8 +1,10 @@
+use std::fmt::Display;
 use axum::{
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
 };
 
+#[derive(Debug)]
 pub enum AppError {
     Reqwest(reqwest::Error),
     Keycloak(&'static str, StatusCode, String),
@@ -65,5 +67,11 @@ impl IntoResponse for AppError {
 impl From<reqwest::Error> for AppError {
     fn from(err: reqwest::Error) -> Self {
         AppError::Reqwest(err)
+    }
+}
+
+impl Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
     }
 }

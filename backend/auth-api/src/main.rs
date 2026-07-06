@@ -42,8 +42,14 @@ struct RegisterDTO {
 
 #[tokio::main]
 async fn main() {
-    let app = create_app(AppState::default());
-    let listener = TcpListener::bind("0.0.0.0:3000")
+    let state = AppState::from_env()
+        .await
+        .expect("failed to initialize application state");
+
+    let app = create_app(state);
+    let bind_addr = std::env::var("AUTH_API_BIND")
+        .unwrap_or_else(|_| "0.0.0.0:3000".to_string());
+    let listener = TcpListener::bind(&bind_addr)
         .await
         .expect("failed to bind tcp listener");
     axum::serve(listener, app)

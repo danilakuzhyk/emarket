@@ -7,10 +7,13 @@ pub struct KafkaState {
     producer: SharedKafkaProducer,
 }
 
-impl Default for KafkaState {
-    fn default() -> Self {
-        let producer = SharedKafkaProducer::default();
-        Self { producer }
+impl KafkaState {
+    pub fn from_env() -> Self {
+        let bootstrap = std::env::var("KAFKA_BOOTSTRAP_SERVERS")
+            .unwrap_or_else(|_| "localhost:9092".to_string());
+        Self {
+            producer: SharedKafkaProducer::new(&bootstrap),
+        }
     }
 }
 
