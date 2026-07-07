@@ -1,6 +1,7 @@
-[package]
-name = "emarket"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+    "backend/auth-api"
+]
+resolver = "2"
 
-[dependencies]
+[workspace.dependencies]
