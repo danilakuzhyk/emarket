@@ -132,6 +132,31 @@ pub async fn logout_request(state: &KeycloakState, refresh_token: &str) -> Resul
     }
 }
 
+pub async fn refresh_request(
+    state: &KeycloakState,
+    old_refresh_token: &str,
+) -> Result<KeycloakTokenResponse, AppError> {
+    let url = format!(
+        "{}/realms/{}/protocol/openid-connect/token",
+        state.keycloak_base_url, state.keycloak_realm
+    );
+    let params = [
+        ("grant_type", "refresh_token"),
+        ("client_id", &state.keycloak_client_id),
+        ("client_secret", &state.keycloak_client_secret),
+        ("refresh_token", &old_refresh_token),
+    ];
+
+    let response = state.http_client.post(&url).form(&params).send().await?;
+
+    if response.status().is_success() {
+        let tokens: KeycloakTokenResponse = response.json().await?;
+        Ok(tokens)
+    } else {
+        Err(AppError::Unauthorized)
+    }
+}
+
 pub async fn user_register_request(
     state: &KeycloakState,
     payload: &RegisterDTO,

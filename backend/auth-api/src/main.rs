@@ -4,6 +4,7 @@ mod ui;
 mod state;
 
 use crate::error::AppError;
+use crate::error::{AppError, FormattedAppError};
 use crate::services::keycloak::{
     forgot_password_request, login_request, logout_request, refresh_request, user_register_request,
 };
@@ -102,7 +103,7 @@ async fn login_handler(
     format: AcceptFormat,
     jar: CookieJar,
     Form(payload): Form<LoginDTO>,
-) -> Result<Response, crate::error::FormattedAppError> {
+) -> Result<Response, FormattedAppError> {
     let tokens = login_request(&state.keycloak_state, &payload)
         .await
         .map_err(|e| e.with_format(format))?;
@@ -134,7 +135,7 @@ async fn logout_handler(
     State(state): State<AppState>,
     format: AcceptFormat,
     jar: CookieJar,
-) -> Result<Response, crate::error::FormattedAppError> {
+) -> Result<Response, FormattedAppError> {
     let refresh_token = jar
         .get("refresh_token")
         .map(|c| c.value().to_string())
@@ -163,11 +164,44 @@ async fn logout_handler(
     }
 }
 
+async fn refresh_handler(
+    State(state): State<AppState>,
+    format: AcceptFormat,
+    jar: CookieJar,
+) -> Result<Response, error::FormattedAppError> {
+    let old_refresh_token = jar
+        .get("refresh_token")
+        .map(|c| c.value().to_string())
+        .ok_or(AppError::Unauthorized)
+        .map_err(|e| e.with_format(format))?;
+
+    let tokens = refresh_request(&state.keycloak_state, &old_refresh_token)
+        .await
+        .map_err(|e| e.with_format(format))?;
+
+    let new_jar = apply_token_cookies(jar, &tokens.access_token, &tokens.refresh_token);
+
+    match format {
+        AcceptFormat::Html => {
+            Ok((new_jar, HtmlOrJson::Empty(StatusCode::OK)).into_response())
+        }
+        AcceptFormat::Json => {
+            Ok((
+                new_jar,
+                HtmlOrJson::Json(
+                    StatusCode::OK,
+                    tokens_json(&tokens.access_token, &tokens.refresh_token),
+                ),
+            ).into_response())
+        }
+    }
+}
+
 async fn forgot_password_handler(
     State(state): State<AppState>,
     format: AcceptFormat,
     Form(payload): Form<ForgotPasswordDTO>,
-) -> Result<Response, crate::error::FormattedAppError> {
+) -> Result<Response, FormattedAppError> {
     forgot_password_request(&state.keycloak_state, &payload)
         .await
         .map_err(|e| e.with_format(format))?;
@@ -195,7 +229,7 @@ async fn customer_register_handler(
     State(state): State<AppState>,
     format: AcceptFormat,
     Form(payload): Form<RegisterDTO>,
-) -> Result<Response, crate::error::FormattedAppError> {
+) -> Result<Response, FormattedAppError> {
     let user_id = user_register_request(&state.keycloak_state, &payload, "customer")
         .await
         .map_err(|e| e.with_format(format))?;
@@ -222,7 +256,7 @@ async fn vendor_register_handler(
     State(state): State<AppState>,
     format: AcceptFormat,
     Form(payload): Form<RegisterDTO>,
-) -> Result<Response, crate::error::FormattedAppError> {
+) -> Result<Response, FormattedAppError> {
     let user_id = user_register_request(&state.keycloak_state, &payload, "vendor")
         .await
         .map_err(|e| e.with_format(format))?;
