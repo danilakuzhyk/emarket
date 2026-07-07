@@ -3,12 +3,18 @@ mod error;
 mod ui;
 mod state;
 
-use crate::error::{AppError, FormattedAppError};
-use crate::services::keycloak::{
+use error::{AppError, FormattedAppError};
+use services::keycloak::{
     forgot_password_request, login_request, logout_request, refresh_request, user_register_request,
 };
-use crate::state::AppState;
-use crate::ui::{forgot_password_form, layout, login_form, register_form};
+use services::kafka::{send_customer_registered, send_vendor_registered};
+use state::AppState;
+use ui::{forgot_password_form, layout, login_form, register_form};
+use shared::{
+    auth::{UserRole, unsafe_decode_role},
+    html_or_json::{AcceptFormat, HtmlOrJson},
+};
+
 use axum::{
     Router,
     serve,
@@ -19,10 +25,6 @@ use axum::{
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::Deserialize;
-use shared::{
-    auth::{UserRole, unsafe_decode_role},
-    html_or_json::{AcceptFormat, HtmlOrJson},
-};
 use tokio::net::TcpListener;
 
 #[derive(Deserialize)]
@@ -236,6 +238,11 @@ async fn customer_register_handler(
         .await
         .map_err(|e| e.with_format(format))?;
 
+    let event = shared::kafka_events::CustomerRegisteredEvent::new(user_id.to_string(), payload.email);
+    send_customer_registered(&state.kafka_state, event)
+        .await
+        .map_err(|e| e.with_format(format))?;
+
     match format {
         AcceptFormat::Html => {
             let success_html = ui::html_success_fragment("Success!");
@@ -260,6 +267,11 @@ async fn vendor_register_handler(
     Form(payload): Form<RegisterDTO>,
 ) -> Result<Response, FormattedAppError> {
     let user_id = user_register_request(&state.keycloak_state, &payload, "vendor")
+        .await
+        .map_err(|e| e.with_format(format))?;
+
+    let event = shared::kafka_events::VendorRegisteredEvent::new(user_id.to_string(), payload.email);
+    send_vendor_registered(&state.kafka_state, event)
         .await
         .map_err(|e| e.with_format(format))?;
 
