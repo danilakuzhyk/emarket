@@ -130,6 +130,39 @@ async fn login_handler(
     }
 }
 
+async fn logout_handler(
+    State(state): State<AppState>,
+    format: AcceptFormat,
+    jar: CookieJar,
+) -> Result<Response, crate::error::FormattedAppError> {
+    let refresh_token = jar
+        .get("refresh_token")
+        .map(|c| c.value().to_string())
+        .ok_or(AppError::Unauthorized)
+        .map_err(|e| e.with_format(format))?;
+
+    logout_request(&state.keycloak_state, &refresh_token)
+        .await
+        .map_err(|e| e.with_format(format))?;
+
+    let new_jar = jar
+        .remove(Cookie::from("access_token"))
+        .remove(Cookie::from("refresh_token"));
+
+    match format {
+        AcceptFormat::Html => {
+            let response = (StatusCode::OK, [("HX-Redirect", "/login")]);
+            Ok((new_jar, response).into_response())
+        }
+        AcceptFormat::Json => {
+            Ok((
+                new_jar,
+                HtmlOrJson::Json(StatusCode::OK, serde_json::json!({"status": "ok"})),
+            ).into_response())
+        }
+    }
+}
+
 async fn customer_register_handler(
     State(state): State<AppState>,
     format: AcceptFormat,
