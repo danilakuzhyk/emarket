@@ -45,6 +45,13 @@ impl Display for UserID {
         write!(f, "{}", self.0)
     }
 }
+
+#[derive(Deserialize)]
+pub(crate) struct KeycloakTokenResponse {
+    pub(crate) access_token: String,
+    pub(crate) refresh_token: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct KeycloakUserRequest {
@@ -68,6 +75,34 @@ struct KeycloakCredential {
 struct AdminTokenResponse {
     access_token: String,
 }
+
+pub async fn login_request(
+    state: &KeycloakState,
+    payload: &LoginDTO,
+) -> Result<KeycloakTokenResponse, AppError> {
+    let url = format!(
+        "{}/realms/{}/protocol/openid-connect/token",
+        state.keycloak_base_url, state.keycloak_realm
+    );
+
+    let params = [
+        ("grant_type", "password"),
+        ("client_id", &state.keycloak_client_id),
+        ("client_secret", &state.keycloak_client_secret),
+        ("username", &payload.login),
+        ("password", &payload.password),
+    ];
+
+    let response = state.http_client.post(&url).form(&params).send().await?;
+
+    if response.status().is_success() {
+        let tokens: KeycloakTokenResponse = response.json().await?;
+        Ok(tokens)
+    } else {
+        Err(AppError::Unauthorized)
+    }
+}
+
 pub async fn user_register_request(
     state: &KeycloakState,
     payload: &RegisterDTO,

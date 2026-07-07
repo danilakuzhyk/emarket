@@ -12,8 +12,10 @@ use crate::ui::{forgot_password_form, layout, login_form, register_form};
 use axum::{
     Router,
     serve,
-    response::{Html},
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
+    extract::{Form, Path, State},
+    http::StatusCode,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::Deserialize;
@@ -72,6 +74,60 @@ fn create_app(state: AppState) -> Router {
         )
         .route("/api/users/vendors/register", post(vendor_register_handler))
         .with_state(state)
+}
+
+fn apply_token_cookies(jar: CookieJar, access_token: &str, refresh_token: &str) -> CookieJar {
+    jar.add(
+        Cookie::build(("access_token", access_token.to_string()))
+            .path("/")
+            .http_only(true)
+            .same_site(SameSite::Lax),
+    )
+        .add(
+            Cookie::build(("refresh_token", refresh_token.to_string()))
+                .path("/")
+                .http_only(true)
+                .same_site(SameSite::Lax),
+        )
+}
+
+fn tokens_json(access_token: &str, refresh_token: &str) -> serde_json::Value {
+    serde_json::json!({
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    })
+}
+async fn login_handler(
+    State(state): State<AppState>,
+    format: AcceptFormat,
+    jar: CookieJar,
+    Form(payload): Form<LoginDTO>,
+) -> Result<Response, crate::error::FormattedAppError> {
+    let tokens = login_request(&state.keycloak_state, &payload)
+        .await
+        .map_err(|e| e.with_format(format))?;
+
+    let role = unsafe_decode_role(&tokens.access_token).unwrap_or(UserRole::Customer);
+    let new_jar = apply_token_cookies(jar, &tokens.access_token, &tokens.refresh_token);
+
+    match format {
+        AcceptFormat::Html => {
+            let response = (
+                StatusCode::OK,
+                [("HX-Redirect", format!("/{}s/profile", role))],
+            ).into_response();
+            Ok((new_jar, response).into_response())
+        }
+        AcceptFormat::Json => {
+            Ok((
+                new_jar,
+                HtmlOrJson::Json(
+                    StatusCode::OK,
+                    tokens_json(&tokens.access_token, &tokens.refresh_token),
+                ),
+            ).into_response())
+        }
+    }
 }
 
 async fn customer_register_handler(

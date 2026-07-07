@@ -32,6 +32,28 @@ pub fn layout(title: &str, content: String) -> String {
     markup.into_string()
 }
 
+pub fn login_form() -> String {
+    let form = html! {
+        article {
+            header { "User authorization" }
+            form hx-post="/api/users/login" hx-target="#error-container" hx-swap="innerHTML" {
+                label for="login" { "Email" }
+                input type="email" id="login" name="login" placeholder="ivan@example.com" required;
+
+                label for="password" { "Password" }
+                input type="password" id="password" name="password" required;
+
+                button type="submit" { "Log in" }
+            }
+            p {
+                a href="/forgot-password" { "Forgot password?" }
+            }
+            div id="error-container" {}
+        }
+    };
+    form.into_string()
+}
+
 pub fn register_form() -> String {
     let form = html! {
         article id="register-card" {
@@ -93,6 +115,18 @@ pub fn html_error_fragment(message: &str) -> String {
     let fragment = html! {
         div style="padding: 1rem; margin-top: 1rem; background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 4px;" {
             strong { "Error: " } (message)
+        }
+    };
+    fragment.into_string()
+}
+
+pub fn html_success_fragment(message: &str) -> String {
+    let fragment = html! {
+        div style="padding: 1rem; margin-top: 1rem; background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; border-radius: 4px;" {
+            strong { "Success! " } (message)
+            p style="margin-top: 0.5rem;" {
+                a href="/login" { "Click to login" }
+            }
         }
     };
     fragment.into_string()
