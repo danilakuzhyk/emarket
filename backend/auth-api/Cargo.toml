@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 axum = { workspace = true }
+maud = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 rdkafka = { workspace = true }
