@@ -1,3 +1,6 @@
-fn main() {
-    println!("Hello, world!");
+mod services;
+
+#[tokio::main]
+async fn main() {
+    println!("Auth API initialized");
 }
