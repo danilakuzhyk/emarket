@@ -9,3 +9,4 @@ tokio = { workspace = true }
 reqwest = { workspace = true }
 rdkafka = { workspace = true }
 thiserror = { workspace = true }
+shared = { path = "../shared" }
