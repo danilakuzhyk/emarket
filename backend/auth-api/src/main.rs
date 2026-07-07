@@ -3,7 +3,6 @@ mod error;
 mod ui;
 mod state;
 
-use crate::error::AppError;
 use crate::error::{AppError, FormattedAppError};
 use crate::services::keycloak::{
     forgot_password_request, login_request, logout_request, refresh_request, user_register_request,
@@ -25,8 +24,6 @@ use shared::{
     html_or_json::{AcceptFormat, HtmlOrJson},
 };
 use tokio::net::TcpListener;
-use state::AppState;
-use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct LoginDTO {
@@ -98,6 +95,11 @@ fn tokens_json(access_token: &str, refresh_token: &str) -> serde_json::Value {
         "refresh_token": refresh_token,
     })
 }
+
+async fn get_public_certs_handler(State(state): State<AppState>) -> Response {
+    axum::Json(&state.keycloak_state.cached_jwks).into_response()
+}
+
 async fn login_handler(
     State(state): State<AppState>,
     format: AcceptFormat,
@@ -168,7 +170,7 @@ async fn refresh_handler(
     State(state): State<AppState>,
     format: AcceptFormat,
     jar: CookieJar,
-) -> Result<Response, error::FormattedAppError> {
+) -> Result<Response, FormattedAppError> {
     let old_refresh_token = jar
         .get("refresh_token")
         .map(|c| c.value().to_string())

@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use shared::auth::JwksResponse;
 
 #[derive(Clone)]
 pub struct KeycloakState {
@@ -12,6 +13,7 @@ pub struct KeycloakState {
     keycloak_realm: String,
     keycloak_client_id: String,
     keycloak_client_secret: String,
+    pub cached_jwks: JwksResponse,
 }
 
 impl KeycloakState {
@@ -27,12 +29,30 @@ impl KeycloakState {
 
         let http_client = Client::new();
 
+        let jwks_url = format!(
+            "{}/realms/{}/protocol/openid-connect/certs",
+            keycloak_base_url.trim_end_matches('/'),
+            keycloak_realm
+        );
+
+        let response = http_client
+            .get(&jwks_url)
+            .send()
+            .await
+            .map_err(|e| AppError::Keycloak("jwks_fetch", StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let cached_jwks = response
+            .json::<JwksResponse>()
+            .await
+            .map_err(|e| AppError::Keycloak("jwks_parse", StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
         Ok(Self {
             http_client,
             keycloak_base_url,
             keycloak_realm,
             keycloak_client_id,
             keycloak_client_secret,
+            cached_jwks,
         })
     }
 }
