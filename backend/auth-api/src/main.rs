@@ -11,7 +11,26 @@ use axum::{
 };
 use tokio::net::TcpListener;
 use state::AppState;
+use serde::Deserialize;
 
+#[derive(Deserialize)]
+pub struct LoginDTO {
+    login: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+pub struct RegisterDTO {
+    first_name: String,
+    second_name: String,
+    email: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+pub struct ForgotPasswordDTO {
+    email: String,
+}
 
 #[tokio::main]
 async fn main() {
