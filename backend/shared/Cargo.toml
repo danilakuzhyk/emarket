@@ -12,3 +12,4 @@ rdkafka = { workspace = true }
 reqwest = { workspace = true }
 jsonwebtoken = { workspace = true }
 base64 = { workspace = true }
+time = { workspace = true }

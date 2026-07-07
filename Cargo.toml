@@ -17,3 +17,4 @@ serde_json = { version = "1.0.150" }
 serde = { version = "1.0.228", features = ["derive"] }
 base64 = { version = "0.22.1" }
 jsonwebtoken = { version = "10.4.0" }
+time = { version = "0.3.53", features = ["serde", "formatting"]}
