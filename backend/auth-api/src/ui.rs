@@ -85,6 +85,26 @@ pub fn register_form() -> String {
     form.into_string()
 }
 
+pub fn forgot_password_form() -> String {
+    let form = html! {
+        article id="forgot-password-card" {
+            header { "Reset password" }
+            p { "Enter your email and we will send password reset instructions if the account exists." }
+            form hx-post="/api/users/forgot-password" hx-target="#error-container" hx-swap="innerHTML" {
+                label for="email" { "Email" }
+                input type="email" id="email" name="email" placeholder="ivan@example.com" required;
+
+                button type="submit" { "Send reset link" }
+            }
+            p {
+                a href="/login" { "Back to login" }
+            }
+            div id="error-container" {}
+        }
+    };
+    form.into_string()
+}
+
 pub fn confirm_button(role: &str) -> String {
     let markup = html! {
         form hx-post=(format!("/api/users/{}s/register", role)) hx-target="#error-container" hx-swap="innerHTML" {

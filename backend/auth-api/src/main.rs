@@ -163,6 +163,34 @@ async fn logout_handler(
     }
 }
 
+async fn forgot_password_handler(
+    State(state): State<AppState>,
+    format: AcceptFormat,
+    Form(payload): Form<ForgotPasswordDTO>,
+) -> Result<Response, crate::error::FormattedAppError> {
+    forgot_password_request(&state.keycloak_state, &payload)
+        .await
+        .map_err(|e| e.with_format(format))?;
+
+    let message = "If an account with that email exists, password reset instructions were sent.";
+
+    match format {
+        AcceptFormat::Html => {
+            Ok((
+                StatusCode::OK,
+                [
+                    ("HX-Retarget", "#forgot-password-card"),
+                    ("HX-Reswap", "outerHTML"),
+                ],
+                Html(ui::html_success_fragment(message)),
+            ).into_response())
+        }
+        AcceptFormat::Json => {
+            Ok(HtmlOrJson::Json(StatusCode::OK, serde_json::json!({"status": "ok"})).into_response())
+        }
+    }
+}
+
 async fn customer_register_handler(
     State(state): State<AppState>,
     format: AcceptFormat,

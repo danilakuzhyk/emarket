@@ -76,6 +76,11 @@ struct AdminTokenResponse {
     access_token: String,
 }
 
+#[derive(Deserialize)]
+struct KeycloakUserSummary {
+    id: String,
+}
+
 pub async fn login_request(
     state: &KeycloakState,
     payload: &LoginDTO,
@@ -137,6 +142,70 @@ pub async fn user_register_request(
     set_user_role(state, &admin_token, &user_id, role).await?;
     Ok(user_id)
 }
+
+pub async fn forgot_password_request(
+    state: &KeycloakState,
+    payload: &ForgotPasswordDTO,
+) -> Result<(), AppError> {
+    let admin_token = get_admin_token(state).await?;
+    let user_id = find_user_id_by_email(state, &admin_token, &payload.email).await?;
+    let Some(user_id) = user_id else {
+        return Ok(());
+    };
+
+    let url = format!(
+        "{}/admin/realms/{}/users/{}/execute-actions-email",
+        state.keycloak_base_url, state.keycloak_realm, user_id
+    );
+
+    let response = state
+        .http_client
+        .put(&url)
+        .bearer_auth(&admin_token)
+        .json(&vec!["UPDATE_PASSWORD"])
+        .send()
+        .await?;
+
+    if response.status().is_success() || response.status() == StatusCode::NO_CONTENT {
+        Ok(())
+    } else {
+        Err(AppError::Keycloak(
+            "forgot password",
+            response.status(),
+            response.text().await.unwrap_or_default(),
+        ))
+    }
+}
+
+async fn find_user_id_by_email(
+    state: &KeycloakState,
+    admin_token: &str,
+    email: &str,
+) -> Result<Option<String>, AppError> {
+    let url = format!(
+        "{}/admin/realms/{}/users?email={}&exact=true",
+        state.keycloak_base_url, state.keycloak_realm, email
+    );
+
+    let response = state
+        .http_client
+        .get(&url)
+        .bearer_auth(admin_token)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        let users: Vec<KeycloakUserSummary> = response.json().await?;
+        Ok(users.into_iter().next().map(|user| user.id))
+    } else {
+        Err(AppError::Keycloak(
+            "user lookup",
+            response.status(),
+            response.text().await.unwrap_or_default(),
+        ))
+    }
+}
+
 pub async fn set_user_role(
     state: &KeycloakState,
     admin_token: &str,
@@ -179,7 +248,6 @@ async fn get_admin_token(state: &KeycloakState) -> Result<String, AppError> {
 
     let response = state.http_client.post(&url).form(&params).send().await?;
 
-        Self { base_url }
     if response.status().is_success() {
         let json: AdminTokenResponse = response.json().await?;
         Ok(json.access_token)
