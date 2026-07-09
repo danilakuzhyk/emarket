@@ -8,3 +8,4 @@ axum = { workspace = true }
 tokio = { workspace = true }
 reqwest = { version = "0.13.4", features = ["form", "json"] }
 rdkafka = { workspace = true }
+tracing = { workspace = true }
