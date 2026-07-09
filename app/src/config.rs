@@ -34,6 +34,7 @@ impl AppConfig {
             .set_default("keycloak.base_url", "http://localhost:8080")?
             .set_default("keycloak.realm", "emarket")?
             .set_default("keycloak.client_id", "emarket-app")?
+            .set_default("keycloak.client_secret", "secret")?
             .set_default("kafka.boostrap_server", "localhost:9092")?
 
             .add_source(

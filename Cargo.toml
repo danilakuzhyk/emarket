@@ -1,7 +1,7 @@
 [workspace]
 members = ["app",
-    "backend/auth-api",
-    "backend/shared"
+    "auth-api",
+    "shared"
 ]
 resolver = "2"
 

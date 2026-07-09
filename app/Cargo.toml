@@ -11,4 +11,4 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.23" }
 axum = { workspace = true }
-auth-api = { path = "../backend/auth-api" }
+auth-api = { path = "../auth-api" }
