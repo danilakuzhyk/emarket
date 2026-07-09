@@ -3,6 +3,7 @@ use rdkafka::{
     producer::{FutureProducer, FutureRecord},
 };
 use std::time::Duration;
+use tracing::{info, error};
 
 fn base_config(bootstrap_servers: &str) -> ClientConfig {
     let mut config = ClientConfig::new();
@@ -17,18 +18,14 @@ pub struct SharedKafkaProducer {
     producer: FutureProducer,
 }
 
-impl Default for SharedKafkaProducer {
-    fn default() -> Self {
-        Self::new("localhost:9092")
-    }
-}
-
 impl SharedKafkaProducer {
-    pub fn new(bootstrap_servers: &str) -> Self {
+    pub fn new(bootstrap_servers: &str) -> Result<Self, String> {
         let producer: FutureProducer = base_config(bootstrap_servers)
             .create()
-            .expect("failed to create a producer");
-        Self { producer }
+            .map_err(|e| format!("Failed to create Kafka producer: {}", e))?;
+
+        info!("Kafka producer successfully initialized for: {}", bootstrap_servers);
+        Ok(Self { producer })
     }
 
     pub async fn send_internal<T>(&self, topic: &str, key: &str, payload: &T) -> Result<(), String>
@@ -37,7 +34,10 @@ impl SharedKafkaProducer {
     {
         let payload_bytes = match serde_json::to_vec(payload) {
             Ok(bytes) => bytes,
-            Err(error) => return Err(error.to_string()),
+            Err(error) => {
+                error!("Failed to serialize Kafka payload: {}", error);
+                return Err(error.to_string());
+            }
         };
 
         match self
@@ -48,8 +48,14 @@ impl SharedKafkaProducer {
             )
             .await
         {
-            Ok(_) => Ok(()),
-            Err((kafka_error, _)) => Err(format!("Error Kafka: {}", kafka_error)),
+            Ok(_) => {
+                tracing::debug!("Message successfully sent to topic: {}", topic);
+                Ok(())
+            }
+            Err((kafka_error, _)) => {
+                error!("Kafka send error on topic {}: {}", topic, kafka_error);
+                Err(format!("Error Kafka: {}", kafka_error))
+            }
         }
     }
 }

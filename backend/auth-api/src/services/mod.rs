@@ -1,2 +1,2 @@
-pub mod kafka;
-pub mod keycloak;
+pub(crate) mod kafka;
+pub(crate) mod keycloak;

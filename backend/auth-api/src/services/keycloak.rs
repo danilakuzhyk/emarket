@@ -1,13 +1,23 @@
 #[derive(Clone)]
-pub struct KeycloakClient {
-    pub base_url: String,
+pub(crate) struct KeycloakState {
+    base_url: String,
+    realm: String,
+    client_id: String,
+    client_secret: String,
 }
 
-impl KeycloakClient {
-    pub fn from_env() -> Self {
-        let base_url = std::env::var("KEYCLOAK_BASE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".to_string());
-
-        Self { base_url }
+impl KeycloakState {
+    pub fn new(
+        base_url: String,
+        realm: String,
+        client_id: String,
+        client_secret: String,
+    ) -> KeycloakState {
+        KeycloakState {
+            base_url,
+            realm,
+            client_id,
+            client_secret,
+        }
     }
 }
