@@ -3,7 +3,8 @@ use rdkafka::{
     producer::{FutureProducer, FutureRecord},
 };
 use std::time::Duration;
-use tracing::{info, error, debug};
+use tracing::{debug, error, info};
+use url::Url;
 
 #[derive(Debug, thiserror::Error)]
 pub enum KafkaError {
@@ -18,14 +19,32 @@ pub enum KafkaError {
         topic: String,
         source: rdkafka::error::KafkaError,
     },
+
+    #[error("Bootstrap URL '{0}' is missing a host")]
+    MissingHost(Url),
+
+    #[error("Bootstrap URL '{0}' is missing a port")]
+    MissingPort(Url),
 }
 
-fn base_config(bootstrap_servers: &str) -> ClientConfig {
+fn bootstrap_server_string(url: &Url) -> Result<String, KafkaError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| KafkaError::MissingHost(url.clone()))?;
+    let port = url
+        .port()
+        .ok_or_else(|| KafkaError::MissingPort(url.clone()))?;
+    Ok(format!("{host}:{port}"))
+}
+
+fn base_config(bootstrap_server: &Url) -> Result<ClientConfig, KafkaError> {
+    let servers = bootstrap_server_string(bootstrap_server)?;
+
     let mut config = ClientConfig::new();
     config
-        .set("bootstrap.servers", bootstrap_servers)
+        .set("bootstrap.servers", servers)
         .set("message.timeout.ms", "5000");
-    config
+    Ok(config)
 }
 
 #[derive(Clone)]
@@ -34,16 +53,24 @@ pub struct SharedKafkaProducer {
 }
 
 impl SharedKafkaProducer {
-    pub fn new(bootstrap_servers: &str) -> Result<Self, KafkaError> {
-        let producer: FutureProducer = base_config(bootstrap_servers)
+    pub fn new(bootstrap_server: &Url) -> Result<Self, KafkaError> {
+        let producer: FutureProducer = base_config(bootstrap_server)?
             .create()
             .inspect_err(|e| error!("Failed to create Kafka producer: {}", e))?;
 
-        info!("Kafka producer successfully initialized for: {}", bootstrap_servers);
+        info!(
+            "Kafka producer successfully initialized for: {}",
+            bootstrap_server
+        );
         Ok(Self { producer })
     }
 
-    pub async fn send_internal<T>(&self, topic: &str, key: &str, payload: &T) -> Result<(), KafkaError>
+    pub async fn send_internal<T>(
+        &self,
+        topic: &str,
+        key: &str,
+        payload: &T,
+    ) -> Result<(), KafkaError>
     where
         T: serde::Serialize,
     {
