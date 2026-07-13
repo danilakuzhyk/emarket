@@ -1,4 +1,5 @@
 use crate::AuthApiConfig;
+use crate::error::AuthError;
 use crate::services::kafka::KafkaState;
 use crate::services::keycloak::KeycloakState;
 
@@ -9,17 +10,15 @@ pub(crate) struct AuthState {
 }
 
 impl AuthState {
-    pub fn new(config: AuthApiConfig) -> Self {
-        AuthState {
+    pub fn new(config: AuthApiConfig) -> Result<Self, AuthError> {
+        Ok(AuthState {
             keycloak: KeycloakState::new(
                 config.keycloak_base_url,
                 config.keycloak_realm,
                 config.keycloak_client_id,
                 config.keycloak_client_secret,
             ),
-            kafka: KafkaState::new(
-                config.kafka_bootstrap_server
-            ),
-        }
+            kafka: KafkaState::new(config.kafka_bootstrap_server)?,
+        })
     }
 }

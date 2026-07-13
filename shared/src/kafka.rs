@@ -3,7 +3,22 @@ use rdkafka::{
     producer::{FutureProducer, FutureRecord},
 };
 use std::time::Duration;
-use tracing::{info, error};
+use tracing::{info, error, debug};
+
+#[derive(Debug, thiserror::Error)]
+pub enum KafkaError {
+    #[error("Failed to create Kafka producer: {0}")]
+    Initialization(#[from] rdkafka::error::KafkaError),
+
+    #[error("Failed to serialize Kafka payload: {0}")]
+    Serialization(#[from] serde_json::Error),
+
+    #[error("Kafka send error on topic {topic}: {source}")]
+    Publish {
+        topic: String,
+        source: rdkafka::error::KafkaError,
+    },
+}
 
 fn base_config(bootstrap_servers: &str) -> ClientConfig {
     let mut config = ClientConfig::new();
@@ -19,43 +34,35 @@ pub struct SharedKafkaProducer {
 }
 
 impl SharedKafkaProducer {
-    pub fn new(bootstrap_servers: &str) -> Result<Self, String> {
+    pub fn new(bootstrap_servers: &str) -> Result<Self, KafkaError> {
         let producer: FutureProducer = base_config(bootstrap_servers)
             .create()
-            .map_err(|e| format!("Failed to create Kafka producer: {}", e))?;
+            .inspect_err(|e| error!("Failed to create Kafka producer: {}", e))?;
 
         info!("Kafka producer successfully initialized for: {}", bootstrap_servers);
         Ok(Self { producer })
     }
 
-    pub async fn send_internal<T>(&self, topic: &str, key: &str, payload: &T) -> Result<(), String>
+    pub async fn send_internal<T>(&self, topic: &str, key: &str, payload: &T) -> Result<(), KafkaError>
     where
         T: serde::Serialize,
     {
-        let payload_bytes = match serde_json::to_vec(payload) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                error!("Failed to serialize Kafka payload: {}", error);
-                return Err(error.to_string());
-            }
-        };
+        let payload_bytes = serde_json::to_vec(payload)
+            .inspect_err(|err| error!("Failed to serialize Kafka payload: {}", err))?;
 
-        match self
-            .producer
+        self.producer
             .send(
                 FutureRecord::to(topic).payload(&payload_bytes).key(key),
                 Duration::from_secs(5),
             )
             .await
-        {
-            Ok(_) => {
-                tracing::debug!("Message successfully sent to topic: {}", topic);
-                Ok(())
-            }
-            Err((kafka_error, _)) => {
-                error!("Kafka send error on topic {}: {}", topic, kafka_error);
-                Err(format!("Error Kafka: {}", kafka_error))
-            }
-        }
+            .map_err(|(kafka_error, _)| KafkaError::Publish {
+                topic: topic.to_string(),
+                source: kafka_error,
+            })
+            .inspect_err(|err| error!("{}", err))?;
+
+        debug!("Message successfully sent to topic: {}", topic);
+        Ok(())
     }
 }
