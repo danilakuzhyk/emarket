@@ -1,6 +1,7 @@
 [workspace]
 members = ["app",
     "auth-api",
+    "config",
     "shared"
 ]
 resolver = "2"
