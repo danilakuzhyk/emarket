@@ -1,4 +1,4 @@
-use auth_api::services::{ClientId, ClientSecret, KeycloakError, Realm};
+use auth_api::services::{ClientId, ClientSecret, KeycloakConfigError, Realm};
 use config::{Config, Environment};
 use serde::Deserialize;
 use thiserror::Error;
@@ -29,7 +29,7 @@ pub enum AppConfigError {
     InvalidKafkaUrl(#[source] url::ParseError),
 
     #[error("Invalid Keycloak settings: {0}")]
-    Keycloak(#[from] KeycloakError),
+    Keycloak(#[from] KeycloakConfigError),
 }
 
 #[derive(Debug, Deserialize)]

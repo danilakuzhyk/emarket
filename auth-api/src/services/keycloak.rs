@@ -2,7 +2,7 @@ use secrecy::{ExposeSecret, SecretString};
 use std::fmt::{Debug, Formatter};
 
 #[derive(Debug, thiserror::Error)]
-pub enum KeycloakError {
+pub enum KeycloakConfigError {
     #[error("{0} cannot be empty")]
     Empty(&'static str),
     #[error("Invalid character '{0}' in realm name")]
@@ -21,14 +21,14 @@ impl AsRef<str> for Realm {
 }
 
 impl Realm {
-    pub fn new(s: &str) -> Result<Self, KeycloakError> {
+    pub fn new(s: &str) -> Result<Self, KeycloakConfigError> {
         let trimmed = s.trim();
         if trimmed.is_empty() {
-            return Err(KeycloakError::Empty("realm"));
+            return Err(KeycloakConfigError::Empty("realm"));
         }
         for c in trimmed.chars() {
             if !c.is_ascii_alphanumeric() && c != '-' && c != '_' {
-                return Err(KeycloakError::InvalidRealmChar(c));
+                return Err(KeycloakConfigError::InvalidRealmChar(c));
             }
         }
         Ok(Self(trimmed.to_string()))
@@ -45,10 +45,10 @@ impl AsRef<str> for ClientId {
 }
 
 impl ClientId {
-    pub fn new(s: &str) -> Result<Self, KeycloakError> {
+    pub fn new(s: &str) -> Result<Self, KeycloakConfigError> {
         let trimmed = s.trim();
         if trimmed.is_empty() {
-            return Err(KeycloakError::Empty("client_id"));
+            return Err(KeycloakConfigError::Empty("client_id"));
         }
         Ok(Self(trimmed.to_string()))
     }
@@ -69,13 +69,13 @@ impl ClientSecret {
     /// Not tied to any particular secret format.
     const MIN_SECRET_LENGTH: usize = 16;
 
-    pub fn new(s: &str) -> Result<Self, KeycloakError> {
+    pub fn new(s: &str) -> Result<Self, KeycloakConfigError> {
         let trimmed = s.trim();
         if trimmed.is_empty() {
-            return Err(KeycloakError::Empty("client_secret"));
+            return Err(KeycloakConfigError::Empty("client_secret"));
         }
         if trimmed.len() < Self::MIN_SECRET_LENGTH {
-            return Err(KeycloakError::SecretTooShort {
+            return Err(KeycloakConfigError::SecretTooShort {
                 min: Self::MIN_SECRET_LENGTH,
             });
         }
