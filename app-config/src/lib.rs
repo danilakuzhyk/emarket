@@ -1,5 +1,9 @@
-use auth_api::services::{ClientId, ClientSecret, KeycloakConfigError, Realm};
 use config::{Config, Environment};
+use config_types::keycloak::BaseUrl;
+use config_types::{
+    kafka::{KafkaBootstrapServer, KafkaConfigError},
+    keycloak::{ClientId, ClientSecret, KeycloakConfigError, Realm},
+};
 use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
@@ -30,6 +34,9 @@ pub enum AppConfigError {
 
     #[error("Invalid Keycloak settings: {0}")]
     Keycloak(#[from] KeycloakConfigError),
+
+    #[error("Invalid Kafka bootstrap server: {0}")]
+    KafkaBootstrapServer(#[from] KafkaConfigError),
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,7 +71,7 @@ pub struct ServerConfig {
 
 #[derive(Debug, Clone)]
 pub struct KeycloakConfig {
-    pub base_url: Url,
+    pub base_url: BaseUrl,
     pub realm: Realm,
     pub client_id: ClientId,
     pub client_secret: ClientSecret,
@@ -72,7 +79,7 @@ pub struct KeycloakConfig {
 
 #[derive(Debug, Clone)]
 pub struct KafkaConfig {
-    pub bootstrap_server: Url,
+    pub bootstrap_server: KafkaBootstrapServer,
 }
 
 #[derive(Debug, Clone)]
@@ -102,16 +109,18 @@ impl AppConfig {
 
     fn try_from_raw(raw: RawAppConfig) -> Result<Self, AppConfigError> {
         let keycloak = KeycloakConfig {
-            base_url: Url::parse(&raw.keycloak.base_url)
-                .map_err(AppConfigError::InvalidKeycloakUrl)?,
+            base_url: BaseUrl::new(
+                Url::parse(&raw.keycloak.base_url).map_err(AppConfigError::InvalidKeycloakUrl)?,
+            )?,
             realm: Realm::new(&raw.keycloak.realm)?,
             client_id: ClientId::new(&raw.keycloak.client_id)?,
             client_secret: ClientSecret::new(&raw.keycloak.client_secret)?,
         };
 
         let kafka = KafkaConfig {
-            bootstrap_server: Url::parse(&raw.kafka.bootstrap_server)
-                .map_err(AppConfigError::InvalidKafkaUrl)?,
+            bootstrap_server: KafkaBootstrapServer::new(
+                Url::parse(&raw.kafka.bootstrap_server).map_err(AppConfigError::InvalidKafkaUrl)?,
+            )?,
         };
 
         Ok(Self {
