@@ -8,4 +8,5 @@ config = { version = "0.15.25" }
 serde = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
-auth-api = { path = "../auth-api" }
+shared = { path = "../shared" }
+config-types = { path = "../config-types" }
