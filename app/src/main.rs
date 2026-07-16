@@ -1,61 +1,88 @@
-mod config;
-
-use crate::config::AppConfig;
-use axum::serve;
-use tracing::{info, error, Level};
-use tracing_subscriber::FmtSubscriber;
-use auth_api::{AuthApiConfig, create_app_router};
+use app_config::AppConfig;
+use auth_api::{AuthApiConfig, AuthInitError, create_app_router};
+use axum::{Router, serve};
+use std::process::ExitCode;
 use tokio::net::TcpListener;
+use tracing::{error, info};
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
+
+#[derive(Debug, thiserror::Error)]
+enum BootstrapError {
+    #[error("Application configuration failed: {0}")]
+    Config(#[from] app_config::AppConfigError),
+
+    #[error("Failed to create router: {0}")]
+    Router(#[from] AuthInitError),
+
+    #[error("Failed to bind address {addr}: {source}")]
+    Bind {
+        addr: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Server error: {0}")]
+    Serve(#[source] std::io::Error),
+}
 
 #[tokio::main]
-async fn main() -> Result<(), u32> {
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
-        .finish();
-
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("logger failed");
-
+async fn main() -> ExitCode {
     dotenvy::dotenv().ok();
+    init_tracing();
 
-    let config = match AppConfig::new() {
-        Ok(config) => config,
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            error!("Application configuration failed: {}", err);
-            return Err(1);
+            error!("{}", err);
+            ExitCode::FAILURE
         }
-    };
+    }
+}
 
+fn init_tracing() {
+    let subscriber = FmtSubscriber::builder()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("logger initialization failed");
+}
+
+async fn run() -> Result<(), BootstrapError> {
+    let config = AppConfig::new()?;
     info!("Application configuration succeeded.");
 
-    let auth_config = AuthApiConfig{
+    let router = build_router(&config).await?;
+    let listener = bind(config.server.port).await?;
+
+    info!(
+        "HTTP server started on http://{}",
+        listener.local_addr().unwrap()
+    );
+
+    serve(listener, router)
+        .await
+        .map_err(BootstrapError::Serve)?;
+
+    info!("Server shut down gracefully");
+    Ok(())
+}
+
+async fn build_router(config: &AppConfig) -> Result<Router, BootstrapError> {
+    let auth_config = AuthApiConfig {
         keycloak_base_url: config.keycloak.base_url.clone(),
         keycloak_realm: config.keycloak.realm.clone(),
         keycloak_client_id: config.keycloak.client_id.clone(),
         keycloak_client_secret: config.keycloak.client_secret.clone(),
         kafka_bootstrap_server: config.kafka.bootstrap_server.clone(),
     };
-    let auth_router = match create_app_router(auth_config).await {
-        Ok(router) => router,
-        Err(e) => {
-            error!("Failed to create router: {}", e);
-            return Err(1);
-        }
-    };
 
-    let addr = format!("0.0.0.0:{}", config.server.port);
-    let listener = match TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            error!("Failed to bind address {}: {}", addr, e);
-            return Err(1);
-        }
-    };
+    Ok(create_app_router(auth_config).await?)
+}
 
-    info!("HTTP-server started on http://{}", addr);
-
-    if let Err(e) = serve(listener, auth_router).await {
-        error!("Server failed because of: {}", e);
-    }
-    Ok(())
+async fn bind(port: u16) -> Result<TcpListener, BootstrapError> {
+    let addr = format!("0.0.0.0:{port}");
+    TcpListener::bind(&addr)
+        .await
+        .map_err(|source| BootstrapError::Bind { addr, source })
 }
