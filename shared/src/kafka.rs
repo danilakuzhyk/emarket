@@ -1,13 +1,13 @@
+use config_types::kafka::KafkaBootstrapServer;
 use rdkafka::{
     config::ClientConfig,
     producer::{FutureProducer, FutureRecord},
 };
 use std::time::Duration;
 use tracing::{debug, error, info};
-use url::Url;
 
 #[derive(Debug, thiserror::Error)]
-pub enum KafkaError {
+pub enum KafkaClientError {
     #[error("Failed to create Kafka producer: {0}")]
     Initialization(#[from] rdkafka::error::KafkaError),
 
@@ -19,32 +19,14 @@ pub enum KafkaError {
         topic: String,
         source: rdkafka::error::KafkaError,
     },
-
-    #[error("Bootstrap URL '{0}' is missing a host")]
-    MissingHost(Url),
-
-    #[error("Bootstrap URL '{0}' is missing a port")]
-    MissingPort(Url),
 }
 
-fn bootstrap_server_string(url: &Url) -> Result<String, KafkaError> {
-    let host = url
-        .host_str()
-        .ok_or_else(|| KafkaError::MissingHost(url.clone()))?;
-    let port = url
-        .port()
-        .ok_or_else(|| KafkaError::MissingPort(url.clone()))?;
-    Ok(format!("{host}:{port}"))
-}
-
-fn base_config(bootstrap_server: &Url) -> Result<ClientConfig, KafkaError> {
-    let servers = bootstrap_server_string(bootstrap_server)?;
-
+fn base_config(bootstrap_server: &KafkaBootstrapServer) -> ClientConfig {
     let mut config = ClientConfig::new();
     config
-        .set("bootstrap.servers", servers)
+        .set("bootstrap.servers", bootstrap_server.as_host_port())
         .set("message.timeout.ms", "5000");
-    Ok(config)
+    config
 }
 
 #[derive(Clone)]
@@ -53,8 +35,8 @@ pub struct SharedKafkaProducer {
 }
 
 impl SharedKafkaProducer {
-    pub fn new(bootstrap_server: &Url) -> Result<Self, KafkaError> {
-        let producer: FutureProducer = base_config(bootstrap_server)?
+    pub fn new(bootstrap_server: &KafkaBootstrapServer) -> Result<Self, KafkaClientError> {
+        let producer: FutureProducer = base_config(bootstrap_server)
             .create()
             .inspect_err(|e| error!("Failed to create Kafka producer: {}", e))?;
 
@@ -70,7 +52,7 @@ impl SharedKafkaProducer {
         topic: &str,
         key: &str,
         payload: &T,
-    ) -> Result<(), KafkaError>
+    ) -> Result<(), KafkaClientError>
     where
         T: serde::Serialize,
     {
@@ -83,7 +65,7 @@ impl SharedKafkaProducer {
                 Duration::from_secs(5),
             )
             .await
-            .map_err(|(kafka_error, _)| KafkaError::Publish {
+            .map_err(|(kafka_error, _)| KafkaClientError::Publish {
                 topic: topic.to_string(),
                 source: kafka_error,
             })

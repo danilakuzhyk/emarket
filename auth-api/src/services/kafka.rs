@@ -1,5 +1,5 @@
-use crate::error::AuthError;
-use shared::kafka::SharedKafkaProducer;
+use config_types::kafka::KafkaBootstrapServer;
+use shared::kafka::{KafkaClientError, SharedKafkaProducer};
 
 #[derive(Clone)]
 pub(crate) struct KafkaState {
@@ -7,8 +7,8 @@ pub(crate) struct KafkaState {
 }
 
 impl KafkaState {
-    pub fn new(bootstrap_server: url::Url) -> Result<Self, AuthError> {
-        let producer = SharedKafkaProducer::new(&bootstrap_server)?;
+    pub fn new(bootstrap_server: &KafkaBootstrapServer) -> Result<Self, KafkaClientError> {
+        let producer = SharedKafkaProducer::new(bootstrap_server)?;
         Ok(Self { producer })
     }
 }
