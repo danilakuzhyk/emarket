@@ -8,7 +8,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[derive(Debug, thiserror::Error)]
 enum BootstrapError {
-    #[error("Application configuration failed: {0}")]
+    #[error("Failed to run server: {0}")]
     Config(#[from] app_config::AppConfigError),
 
     #[error("Failed to create router: {0}")]
