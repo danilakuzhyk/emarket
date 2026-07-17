@@ -8,5 +8,4 @@ config = { version = "0.15.25" }
 serde = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
-shared = { path = "../shared" }
 config-types = { path = "../config-types" }

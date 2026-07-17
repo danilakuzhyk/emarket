@@ -9,5 +9,4 @@ serde = { workspace = true }
 rdkafka = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-url = { workspace = true }
 config-types = { path = "../config-types" }
