@@ -18,7 +18,7 @@ realm = "emarket"
 client_id = "emarket-app"
 
 [kafka]
-bootstrap_server = "localhost:9092"
+bootstrap_server = "http://localhost:9092"
 "#;
 
 #[derive(Debug, Error)]
