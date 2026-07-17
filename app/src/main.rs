@@ -52,8 +52,9 @@ async fn run() -> Result<(), BootstrapError> {
     let config = AppConfig::new()?;
     info!("Application configuration succeeded.");
 
-    let router = build_router(&config).await?;
-    let listener = bind(config.server.port).await?;
+    let port = config.server.port;
+    let router = build_router(config).await?;
+    let listener = bind(port).await?;
 
     info!(
         "HTTP server started on http://{}",
@@ -68,16 +69,8 @@ async fn run() -> Result<(), BootstrapError> {
     Ok(())
 }
 
-async fn build_router(config: &AppConfig) -> Result<Router, BootstrapError> {
-    let auth_config = AuthApiConfig {
-        keycloak_base_url: config.keycloak.base_url.clone(),
-        keycloak_realm: config.keycloak.realm.clone(),
-        keycloak_client_id: config.keycloak.client_id.clone(),
-        keycloak_client_secret: config.keycloak.client_secret.clone(),
-        kafka_bootstrap_server: config.kafka.bootstrap_server.clone(),
-    };
-
-    Ok(create_app_router(auth_config).await?)
+async fn build_router(config: AppConfig) -> Result<Router, BootstrapError> {
+    Ok(create_app_router(into_auth_config(config)).await?)
 }
 
 async fn bind(port: u16) -> Result<TcpListener, BootstrapError> {
@@ -85,4 +78,14 @@ async fn bind(port: u16) -> Result<TcpListener, BootstrapError> {
     TcpListener::bind(&addr)
         .await
         .map_err(|source| BootstrapError::Bind { addr, source })
+}
+
+fn into_auth_config(config: AppConfig) -> AuthApiConfig {
+    AuthApiConfig {
+        keycloak_base_url: config.keycloak.base_url,
+        keycloak_realm: config.keycloak.realm,
+        keycloak_client_id: config.keycloak.client_id,
+        keycloak_client_secret: config.keycloak.client_secret,
+        kafka_bootstrap_server: config.kafka.bootstrap_server,
+    }
 }
