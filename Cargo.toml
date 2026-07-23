@@ -6,7 +6,6 @@ members = ["app",
     "config-types"
 ]
 resolver = "2"
-
 [workspace.dependencies]
 axum = { version = "0.8.9" }
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "time"]}
